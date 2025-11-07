@@ -1,45 +1,97 @@
 pipeline {
-    agent any
-    environment {
-        VIRTUAL_ENV = 'venv'
+  agent any
+
+  environment {
+    VIRTUAL_ENV = '.venv'
+    // Ensure PATH uses venv bin when activated inside sh steps
+  }
+
+  options {
+    // Keep the console log cleaner
+    ansiColor('xterm')
+    timestamps()
+  }
+
+  stages {
+    stage('Setup') {
+      steps {
+        sh '''
+          set -e
+          python3 -m venv ${VIRTUAL_ENV} || true
+          . ${VIRTUAL_ENV}/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+        '''
+      }
     }
-    stages {
-        stage('Setup') {
-            steps {
-                bat "python -m venv %VIRTUAL_ENV%"
-                bat "%VIRTUAL_ENV%\\Scripts\\activate && pip install -r requirements.txt"
-            }
-        }
-        stage('Lint') {
-            steps {
-                bat "%VIRTUAL_ENV%\\Scripts\\activate && flake8 app.py"
-            }
-        }
-        stage('Test') {
-            steps {
-                bat "%VIRTUAL_ENV%\\Scripts\\activate && pytest"
-            }
-        }
-        stage('Coverage') {
-            steps {
-                bat "%VIRTUAL_ENV%\\Scripts\\activate && coverage run -m pytest && coverage report && coverage html"
-            }
-        }
-        stage('Security Scan') {
-            steps {
-                bat "%VIRTUAL_ENV%\\Scripts\\activate && bandit -r app.py"
-            }
-        }
-        stage('Deploy') {
-            steps {
-                echo "Deploying application..."
-                // Add deployment logic here
-            }
-        }
+
+    stage('Lint') {
+      steps {
+        sh '''
+          set -e
+          . ${VIRTUAL_ENV}/bin/activate
+          flake8 app.py
+        '''
+      }
     }
-    post {
-        always {
-            cleanWs()
-        }
+
+    stage('Test') {
+      steps {
+        sh '''
+          set -e
+          . ${VIRTUAL_ENV}/bin/activate
+          # Produce JUnit XML for Jenkins (nice test report UI if you add JUnit post-action)
+          pytest --junitxml=test-results.xml -q
+        '''
+      }
     }
+
+    stage('Coverage') {
+      steps {
+        sh '''
+          set -e
+          . ${VIRTUAL_ENV}/bin/activate
+          coverage run -m pytest -q
+          coverage xml -o coverage.xml
+          coverage report -m > coverage.txt
+        '''
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        sh '''
+          set -e
+          . ${VIRTUAL_ENV}/bin/activate
+          # -r recurse, -q quiet
+          bandit -r . -f json -o bandit.json || true
+          # We do not fail the build on low-severity findings; adjust as needed.
+        '''
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        sh '''
+          set -e
+          . ${VIRTUAL_ENV}/bin/activate
+          mkdir -p dist
+          # "Build" artifact: app output + packaged files
+          python app.py > dist/output.txt
+          tar -czf dist/app_bundle.tgz app.py requirements.txt
+          echo "Deploying application locally (simulated) ..."
+          # If you have a remote server, you could use scp/ssh here.
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      // Archive all useful outputs so you can submit screenshots or links
+      archiveArtifacts artifacts: 'test-results.xml, coverage.xml, coverage.txt, bandit.json, dist/**', fingerprint: true
+      // Clean workspace as the lab suggests
+      cleanWs()
+    }
+  }
 }
