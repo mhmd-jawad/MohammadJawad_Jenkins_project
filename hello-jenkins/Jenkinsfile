@@ -1,0 +1,40 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'JDK17'
+        maven 'Maven3'
+    }
+    options {
+        timestamps()
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Build') {
+            steps {
+                bat 'mvn -B -V -DskipTests clean package'
+            }
+        }
+        stage('Test') {
+            steps {
+                bat 'mvn -B test'
+            }
+        }
+        stage('Package/Archive') {
+            steps {
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+        }
+    }
+    post {
+        always {
+            junit 'target/surefire-reports/*.xml'
+            jacoco execPattern: 'target/jacoco.exec', classPattern: 'target/classes', sourcePattern: 'src/main/java', exclusionPattern: ''
+        }
+        success { echo 'Build succeeded.' }
+        failure { echo 'Build failed. Check logs and test reports.' }
+    }
+}
