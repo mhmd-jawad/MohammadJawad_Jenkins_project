@@ -1,76 +1,51 @@
 pipeline {
-  agent any
-
-  environment {
-    VENV_DIR = 'venv'
-  }
-
-  options {
-    ansiColor('xterm')
-  }
-
-  stages {
-    stage('Setup') {
-      steps {
-        script {
-          if (isUnix()) {
-            // Create venv if missing (Linux/macOS)
-            if (!fileExists("${env.WORKSPACE}/${VENV_DIR}/bin/activate")) {
-              sh "python3 -m venv ${VENV_DIR} || python -m venv ${VENV_DIR}"
+    agent any
+    environment {
+        VIRTUAL_ENV = 'venv'
+    }
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    if (!fileExists("${env.WORKSPACE}/${VIRTUAL_ENV}")) {
+                        sh "python -m venv ${VIRTUAL_ENV}"
+                    }
+                    sh "source ${VIRTUAL_ENV}/bin/activate && pip install -r requirements.txt"
+                }
             }
-            sh ". ${VENV_DIR}/bin/activate && python -m pip install --upgrade pip && pip install -r requirements.txt"
-          } else {
-            // Create venv if missing (Windows)
-            if (!fileExists("${env.WORKSPACE}\\${VENV_DIR}\\Scripts\\activate.bat")) {
-              bat "python -m venv ${VENV_DIR}"
+        }
+
+        stage('Lint') {
+            steps {
+                script {
+                    sh "source ${VIRTUAL_ENV}/bin/activate && flake8 app.py"
+                }
             }
-            bat """
-              call ${VENV_DIR}\\Scripts\\activate
-              python -m pip install --upgrade pip
-              pip install -r requirements.txt
-            """
-          }
         }
-      }
-    }
 
-    stage('Lint') {
-      steps {
-        script {
-          if (isUnix()) {
-            sh ". ${VENV_DIR}/bin/activate && flake8 app.py"
-          } else {
-            bat "call ${VENV_DIR}\\Scripts\\activate && flake8 app.py"
-          }
+        // Faculty of Engineering and Architecture
+        // Software Tools Lab - Fall 2025-2026
+
+        stage('Test') {
+            steps {
+                script {
+                    sh "source ${VIRTUAL_ENV}/bin/activate && pytest"
+                }
+            }
         }
-      }
-    }
 
-    stage('Test') {
-      steps {
-        script {
-          if (isUnix()) {
-            sh ". ${VENV_DIR}/bin/activate && pytest"
-          } else {
-            bat "call ${VENV_DIR}\\Scripts\\activate && pytest"
-          }
+        stage('Deploy') {
+            steps {
+                script {
+                    // Deployment logic, e.g., pushing to a remote server
+                    echo "Deploying application..."
+                }
+            }
         }
-      }
     }
-
-    stage('Deploy') {
-      steps {
-        script {
-          // Deployment logic, e.g., pushing to a remote server
-          echo "Deploying application..."
+    post {
+        always {
+            cleanWs()
         }
-      }
     }
-  }
-
-  post {
-    always {
-      cleanWs()
-    }
-  }
 }
