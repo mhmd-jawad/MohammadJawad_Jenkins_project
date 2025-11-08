@@ -1,65 +1,93 @@
 pipeline {
   agent any
   environment { VENV = ".venv" }
-  options { timestamps()}
+  options { timestamps() }
 
   stages {
 
     stage('Setup') {
       steps {
-        bat '''
-          set PYLAUNCHER=C:\\Windows\\py.exe
-          if exist %PYLAUNCHER% ("%PYLAUNCHER%" --version) else (echo py launcher not found)
-          if not exist .venv (
-            "%PYLAUNCHER%" -m venv .venv || python -m venv .venv
-          )
-          ".venv\\Scripts\\python" -m pip install --upgrade pip
-          ".venv\\Scripts\\python" -m pip install -r requirements.txt
-        '''
+        dir('jenkins_project') {
+          bat '''
+            rem Try to locate a Python interpreter for the service
+            set "PYEXE=C:\\Windows\\py.exe"
+            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python312\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python311\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\anaconda3\\python.exe"
+
+            if not exist "%PYEXE%" (
+              echo ERROR: No system Python found for Jenkins service.
+              exit /b 1
+            )
+
+            "%PYEXE%" --version
+
+            if not exist %VENV% ("%PYEXE%" -m venv %VENV%)
+            ".\\%VENV%\\Scripts\\python" -m pip install --upgrade pip
+            ".\\%VENV%\\Scripts\\python" -m pip install -r requirements.txt
+          '''
+        }
       }
     }
 
     stage('Lint') {
-      steps { bat '"./.venv/Scripts/flake8" app.py' }
+      steps {
+        dir('jenkins_project') {
+          bat '"./%VENV%/Scripts/flake8" app.py'
+        }
+      }
     }
 
     stage('Test') {
-      steps { bat '"./.venv/Scripts/pytest" -q --junitxml=test-results.xml' }
+      steps {
+        dir('jenkins_project') {
+          bat '"./%VENV%/Scripts/pytest" -q --junitxml=test-results.xml'
+        }
+      }
     }
 
     stage('Coverage') {
       steps {
-        bat '''
-          ".venv\\Scripts\\coverage" run -m pytest -q
-          ".venv\\Scripts\\coverage" xml -o coverage.xml
-          ".venv\\Scripts\\coverage" report -m > coverage.txt
-        '''
+        dir('jenkins_project') {
+          bat '''
+            ".\\%VENV%\\Scripts\\coverage" run -m pytest -q
+            ".\\%VENV%\\Scripts\\coverage" xml -o coverage.xml
+            ".\\%VENV%\\Scripts\\coverage" report -m > coverage.txt
+          '''
+        }
       }
     }
 
     stage('Security Scan') {
       steps {
-        bat '''
-          ".venv\\Scripts\\bandit" -r . -f json -o bandit.json
-          if %ERRORLEVEL% NEQ 0 ( echo Bandit issues found; set ERRORLEVEL=0 )
-        '''
+        dir('jenkins_project') {
+          bat '''
+            ".\\%VENV%\\Scripts\\bandit" -r . -f json -o bandit.json
+            if %ERRORLEVEL% NEQ 0 ( echo Bandit issues found; set ERRORLEVEL=0 )
+          '''
+        }
       }
     }
 
     stage('Deploy') {
       steps {
-        bat '''
-          if not exist dist mkdir dist
-          ".venv\\Scripts\\python" app.py > dist\\output.txt
-        '''
-        powershell 'Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_bundle.zip -Force'
+        dir('jenkins_project') {
+          bat '''
+            if not exist dist mkdir dist
+            ".\\%VENV%\\Scripts\\python" app.py > dist\\output.txt
+          '''
+          powershell 'Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_bundle.zip -Force'
+        }
       }
     }
   }
 
   post {
     always {
-      archiveArtifacts artifacts: 'test-results.xml,coverage.xml,coverage.txt,bandit.json,dist/**', fingerprint: true
+      dir('jenkins_project') {
+        archiveArtifacts artifacts: 'test-results.xml,coverage.xml,coverage.txt,bandit.json,dist/**', fingerprint: true
+      }
       cleanWs()
     }
   }
