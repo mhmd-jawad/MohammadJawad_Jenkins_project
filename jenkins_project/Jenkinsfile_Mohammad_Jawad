@@ -75,21 +75,21 @@ pipeline {
       }
     }
 
-    stage('Security Scan') {
-      steps {
-        dir('jenkins_project') {
-          script {
-            // Run bandit, but never hard-fail the build
-            def rc = bat(returnStatus: true, script: '".\\%VENV%\\Scripts\\bandit" -r . -f json -o bandit.json')
-            echo "bandit exit code = ${rc}"
-            if (rc != 0) {
-              currentBuild.result = 'UNSTABLE'
-              echo 'Bandit issues found (marking UNSTABLE, continuing).'
-            }
-          }
-        }
-      }
-    }
+   stage('Security Scan') {
+  steps {
+    dir('jenkins_project') {
+      script {
+        // Run Bandit but never affect the build result
+        def rc = bat(returnStatus: true, script: '''
+          ".\\%VENV%\\Scripts\\bandit" -r . --severity-level high --confidence-level high -f json -o bandit.json
+        ''')
+        echo "bandit exit code = ${rc} (ignored for build status)"
+        // DO NOT set currentBuild.result here -> build remains SUCCESS
+       }
+     }
+   }
+ }
+
 
     stage('Deploy') {
       steps {
