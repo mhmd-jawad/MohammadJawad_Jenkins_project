@@ -1,51 +1,66 @@
 pipeline {
-    agent any
-    environment {
-        VIRTUAL_ENV = 'venv'
+  agent any
+  environment { VENV = ".venv" }
+  options { timestamps(); ansiColor('xterm') }
+
+  stages {
+
+    stage('Setup') {
+      steps {
+        bat '''
+          set PYLAUNCHER=C:\\Windows\\py.exe
+          if exist %PYLAUNCHER% ("%PYLAUNCHER%" --version) else (echo py launcher not found)
+          if not exist .venv (
+            "%PYLAUNCHER%" -m venv .venv || python -m venv .venv
+          )
+          ".venv\\Scripts\\python" -m pip install --upgrade pip
+          ".venv\\Scripts\\python" -m pip install -r requirements.txt
+        '''
+      }
     }
-    stages {
-        stage('Setup') {
-            steps {
-                script {
-                    if (!fileExists("${env.WORKSPACE}/${VIRTUAL_ENV}")) {
-                        sh "python -m venv ${VIRTUAL_ENV}"
-                    }
-                    sh "source ${VIRTUAL_ENV}/bin/activate && pip install -r requirements.txt"
-                }
-            }
-        }
 
-        stage('Lint') {
-            steps {
-                script {
-                    sh "source ${VIRTUAL_ENV}/bin/activate && flake8 app.py"
-                }
-            }
-        }
-
-        // Faculty of Engineering and Architecture
-        // Software Tools Lab - Fall 2025-2026
-
-        stage('Test') {
-            steps {
-                script {
-                    sh "source ${VIRTUAL_ENV}/bin/activate && pytest"
-                }
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                script {
-                    // Deployment logic, e.g., pushing to a remote server
-                    echo "Deploying application..."
-                }
-            }
-        }
+    stage('Lint') {
+      steps { bat '"./.venv/Scripts/flake8" app.py' }
     }
-    post {
-        always {
-            cleanWs()
-        }
+
+    stage('Test') {
+      steps { bat '"./.venv/Scripts/pytest" -q --junitxml=test-results.xml' }
     }
+
+    stage('Coverage') {
+      steps {
+        bat '''
+          ".venv\\Scripts\\coverage" run -m pytest -q
+          ".venv\\Scripts\\coverage" xml -o coverage.xml
+          ".venv\\Scripts\\coverage" report -m > coverage.txt
+        '''
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        bat '''
+          ".venv\\Scripts\\bandit" -r . -f json -o bandit.json
+          if %ERRORLEVEL% NEQ 0 ( echo Bandit issues found; set ERRORLEVEL=0 )
+        '''
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        bat '''
+          if not exist dist mkdir dist
+          ".venv\\Scripts\\python" app.py > dist\\output.txt
+        '''
+        powershell 'Compress-Archive -Path app.py, requirements.txt -DestinationPath dist\\app_bundle.zip -Force'
+      }
+    }
+  }
+
+  post {
+    always {
+      archiveArtifacts artifacts: 'test-results.xml,coverage.xml,coverage.txt,bandit.json,dist/**', fingerprint: true
+      cleanWs()
+    }
+  }
 }
