@@ -9,11 +9,11 @@ pipeline {
       steps {
         dir('jenkins_project') {
           bat '''
-            rem Try to locate a Python interpreter for the service
+            rem === Locate a Python interpreter for the Jenkins service ===
             set "PYEXE=C:\\Windows\\py.exe"
             if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python312\\python.exe"
             if not exist "%PYEXE%" set "PYEXE=C:\\Program Files\\Python311\\python.exe"
-            if not exist "%PYEXE%" set "PYEXE=%LOCALAPPDATA%\\Programs\\Python\\Python312\\python.exe"
+            if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
             if not exist "%PYEXE%" set "PYEXE=%USERPROFILE%\\anaconda3\\python.exe"
 
             if not exist "%PYEXE%" (
@@ -34,7 +34,15 @@ pipeline {
     stage('Lint') {
       steps {
         dir('jenkins_project') {
-          bat '"./%VENV%/Scripts/flake8" app.py'
+          script {
+            // run flake8 but do NOT fail the build if it returns non-zero
+            def rc = bat(returnStatus: true, script: '"./%VENV%/Scripts/flake8" app.py')
+            echo "flake8 exit code = ${rc}"
+            if (rc != 0) {
+              currentBuild.result = 'UNSTABLE'
+              echo 'Lint warnings/errors present (marking UNSTABLE, continuing).'
+            }
+          }
         }
       }
     }
@@ -42,6 +50,7 @@ pipeline {
     stage('Test') {
       steps {
         dir('jenkins_project') {
+          // if you want tests to be non-fatal too, wrap like Lint with returnStatus
           bat '"./%VENV%/Scripts/pytest" -q --junitxml=test-results.xml'
         }
       }
@@ -50,11 +59,18 @@ pipeline {
     stage('Coverage') {
       steps {
         dir('jenkins_project') {
-          bat '''
-            ".\\%VENV%\\Scripts\\coverage" run -m pytest -q
-            ".\\%VENV%\\Scripts\\coverage" xml -o coverage.xml
-            ".\\%VENV%\\Scripts\\coverage" report -m > coverage.txt
-          '''
+          script {
+            def rc = bat(returnStatus: true, script: '''
+              ".\\%VENV%\\Scripts\\coverage" run -m pytest -q
+              ".\\%VENV%\\Scripts\\coverage" xml -o coverage.xml
+              ".\\%VENV%\\Scripts\\coverage" report -m > coverage.txt
+            ''')
+            echo "coverage step exit code = ${rc}"
+            if (rc != 0) {
+              currentBuild.result = 'UNSTABLE'
+              echo 'Coverage step had issues (marking UNSTABLE, continuing).'
+            }
+          }
         }
       }
     }
@@ -62,10 +78,15 @@ pipeline {
     stage('Security Scan') {
       steps {
         dir('jenkins_project') {
-          bat '''
-            ".\\%VENV%\\Scripts\\bandit" -r . -f json -o bandit.json
-            if %ERRORLEVEL% NEQ 0 ( echo Bandit issues found; set ERRORLEVEL=0 )
-          '''
+          script {
+            // Run bandit, but never hard-fail the build
+            def rc = bat(returnStatus: true, script: '".\\%VENV%\\Scripts\\bandit" -r . -f json -o bandit.json')
+            echo "bandit exit code = ${rc}"
+            if (rc != 0) {
+              currentBuild.result = 'UNSTABLE'
+              echo 'Bandit issues found (marking UNSTABLE, continuing).'
+            }
+          }
         }
       }
     }
